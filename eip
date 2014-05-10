@@ -1,0 +1,128 @@
+#!/bin/sh
+#
+#
+#	Resource Agent for AWS EC2 EIP
+#
+# Copyright (c) 2004 mooapp All Rights Reserved.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of version 2 of the GNU General Public License as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it would be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Further, this software is distributed without any warranty that it is
+# free of the rightful claim of any third person regarding infringement
+# or the like.  Any license provided herein, whether implied or
+# otherwise, applies only to this software file.  Patent licenses, if
+# any, provided herein do not apply to combinations of this program with
+# other software, or any other product whatsoever.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write the Free Software Foundation,
+# Inc., 59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
+#
+
+#######################################################################
+# Initialization:
+
+: ${OCF_FUNCTIONS_DIR=${OCF_ROOT}/lib/heartbeat}
+. ${OCF_FUNCTIONS_DIR}/ocf-shellfuncs
+
+#######################################################################
+
+meta_data() {
+	cat <<END
+<?xml version="1.0"?>
+<!DOCTYPE resource-agent SYSTEM "ra-api-1.dtd">
+<resource-agent name="eip" version="0.9">
+<version>1.0</version>
+
+<longdesc lang="en">
+This is a Resource Agent for AWS EC2 EIP (Elastic IP Address). 
+</longdesc>
+<shortdesc lang="en">AWS EC2 EIP resource agent</shortdesc>
+
+<parameters>
+<parameter name="elastic_ip" required="1">
+<longdesc lang="en">
+The Elastic IP address
+</longdesc>
+<shortdesc lang="en">EIP</shortdesc>
+<content type="string" />
+</parameter>
+
+</parameters>
+
+<actions>
+<action name="start"        timeout="20" />
+<action name="stop"         timeout="20" />
+<action name="monitor"      timeout="20" interval="10" depth="0" />
+<action name="meta-data"    timeout="5" />
+<action name="validate-all"   timeout="20" />
+</actions>
+</resource-agent>
+END
+}
+
+#######################################################################
+
+eip_usage() {
+	cat <<END
+usage: $0 {start|stop|monitor|validate-all|meta-data}
+
+Expects to have a fully populated OCF RA-compliant environment set.
+END
+}
+
+eip_start() {
+    eip_monitor
+    if [ $? =  $OCF_SUCCESS ]; then
+	return $OCF_SUCCESS
+    fi
+    /usr/bin/aws ec2 associate-address --public-ip ${OCF_RESKEY_elastic_ip} --instance-id ${instance_id}
+}
+
+eip_stop() {
+    eip_monitor
+    if [ $? =  $OCF_SUCCESS ]; then
+        /usr/bin/aws ec2 disassociate-address --public-ip ${OCF_RESKEY_elastic_ip}
+    fi
+    return $OCF_SUCCESS
+}
+
+eip_monitor() {
+    mon=`/usr/bin/aws ec2 describe-addresses --public-ips ${OCF_RESKEY_elastic_ip} --filters "Name=instance-id,Values=${instance_id}" --output json | grep ${instance_id} | wc -l`	
+    if [ $mon -ne 0  ]; then
+        return $OCF_SUCCESS
+    fi
+    return $OCF_NOT_RUNNING
+}
+
+eip_validate() {
+    return $OCF_SUCCESS
+}
+
+instance_id=`wget -q -O - http://169.254.169.254/latest/meta-data/instance-id`
+
+case $__OCF_ACTION in
+meta-data)	meta_data
+		exit $OCF_SUCCESS
+		;;
+start)		eip_start;;
+stop)		eip_stop;;
+monitor)	eip_monitor;;
+validate-all)   eip_validate;;
+usage|help)	eip_usage
+		exit $OCF_SUCCESS
+		;;
+*)		eip_usage
+		exit $OCF_ERR_UNIMPLEMENTED
+		;;
+esac
+rc=$?
+ocf_log debug "${OCF_RESOURCE_INSTANCE} $__OCF_ACTION : $rc"
+exit $rc
+
